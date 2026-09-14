@@ -17,6 +17,18 @@
 - Enrollment key: deploy via Intune/GPO into `appsettings.json` (or machine env). Used **once** at registration.
 - Device token: returned at registration; never logged; DPAPI-protected.
 
+## Post-rollout enrollment key rotation
+
+After PCs are registered, rotate `AGENT_ENROLLMENT_KEY` so a key left on disk cannot enroll new agents:
+
+1. Generate a new long random key.
+2. `supabase secrets set AGENT_ENROLLMENT_KEY=<new-key> --project-ref <ref>`
+3. Update MIT Asset Settings → Agent enrollment key (and/or cloud workspace settings).
+4. On already-installed PCs, clear `Agent:EnrollmentKey` from `C:\Program Files\MITAssetAgent\appsettings.json` (optional hygiene). Do **not** delete `token.dpapi`.
+5. Existing agents keep heartbeating with their unique device tokens. Reinstall / new PCs need the **new** enrollment key.
+
+Keep `AGENT_ADMIN_SECRET` separate if possible; rotate it only when needed for revoke/regenerate access.
+
 ## HTTPS
 
 Agent talks only to `https://*.supabase.co`. Cleartext HTTP is not supported by design.

@@ -52,6 +52,16 @@ if (-not (Test-Path $exe)) {
   throw "MITAssetAgent.exe not found in $InstallRoot. Publish the Service project first."
 }
 
+# Register Event Log source while we have admin (agent itself must not create it at runtime).
+try {
+  if (-not [System.Diagnostics.EventLog]::SourceExists($DisplayName)) {
+    [System.Diagnostics.EventLog]::CreateEventSource($DisplayName, "Application")
+    Write-Host "Registered Event Log source: $DisplayName"
+  }
+} catch {
+  Write-Warning "Could not register Event Log source (file logging will still work): $($_.Exception.Message)"
+}
+
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existing) {
   Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
