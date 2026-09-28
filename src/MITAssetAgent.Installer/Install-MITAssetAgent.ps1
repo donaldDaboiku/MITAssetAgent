@@ -66,9 +66,13 @@ try {
 
 Copy-Item -Path (Join-Path $PublishDir "*") -Destination $InstallRoot -Recurse -Force
 
-# Never leave install-config.json (with secrets) under Program Files.
+# Never leave install secrets under Program Files.
 Remove-Item -LiteralPath (Join-Path $InstallRoot "install-config.json") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $InstallRoot "install-config.example.json") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $InstallRoot "install-log.txt") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $InstallRoot "Install.cmd") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $InstallRoot "Install-MITAssetAgent.ps1") -Force -ErrorAction SilentlyContinue
+# Keep Uninstall-MITAssetAgent.ps1 under Program Files for later removal.
 
 $appsettings = @{
   Agent = @{
@@ -113,7 +117,15 @@ if ($existing) {
 
 New-Service -Name $ServiceName -BinaryPathName "`"$exe`"" -DisplayName $DisplayName -StartupType Automatic -Description "Reports device presence to MIT Asset"
 sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
-Start-Service -Name $ServiceName
+try {
+  Start-Service -Name $ServiceName
+} catch {
+  $tail = ""
+  $latest = Get-ChildItem -Path (Join-Path $DataDir "logs") -Filter "*.log" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if ($latest) { $tail = (Get-Content $latest.FullName -Tail 20) -join "`n" }
+  throw "Service installed but failed to start. $($_.Exception.Message)`nLog tail:`n$tail"
+}
 
 # Wait for first registration (token.dpapi), then scrub enrollment key from disk.
 $tokenPath = Join-Path $DataDir "token.dpapi"
