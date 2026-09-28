@@ -14,8 +14,10 @@
 
 ## Enrollment key vs device token
 
-- Enrollment key: deploy via Intune/GPO into `appsettings.json` (or machine env). Used **once** at registration.
-- Device token: returned at registration; never logged; DPAPI-protected.
+- Enrollment key: put in `install-config.json` for `Install.cmd` (or pass to the PowerShell installer). Used **once** at registration.
+- After a successful register, the installer and/or agent **clear** `Agent:EnrollmentKey` from `appsettings.json` so it does not stay on disk.
+- Device token: returned at registration; never logged; DPAPI-protected under `C:\ProgramData\MITAssetAgent` (ACL: SYSTEM + Administrators).
+- Do not ship a filled `install-config.json` inside the shared zip; use the example file and fill per deploy.
 
 ## Post-rollout enrollment key rotation
 

@@ -55,7 +55,41 @@ public sealed class RegistrationService : IRegistrationService
             throw new InvalidOperationException(result.Error ?? "Registration failed");
 
         _tokens.SaveToken(result.Token);
+        TryClearEnrollmentKeyFromAppsettings();
         _log.LogInformation("Registered successfully. Linked asset tag: {Tag}", result.AssetTag ?? "(none)");
+    }
+
+    /// <summary>
+    /// Enrollment key is only needed once. Scrub it from appsettings.json after a successful register.
+    /// </summary>
+    private void TryClearEnrollmentKeyFromAppsettings()
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+            if (!File.Exists(path)) return;
+
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var root = doc.RootElement.Clone();
+            // ponytail: rewrite via Dictionary so we don't pull System.Text.Json.Nodes
+            var map = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(root.GetRawText());
+            if (map is null || !map.TryGetValue("Agent", out var agentEl)) return;
+
+            var agent = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(agentEl.GetRawText());
+            if (agent is null) return;
+            if (!agent.TryGetValue("EnrollmentKey", out var keyEl) || string.IsNullOrEmpty(keyEl.GetString()))
+                return;
+
+            agent["EnrollmentKey"] = JsonSerializer.SerializeToElement("");
+            map["Agent"] = JsonSerializer.SerializeToElement(agent);
+            File.WriteAllText(path, JsonSerializer.Serialize(map, new JsonSerializerOptions { WriteIndented = true }));
+            _options.EnrollmentKey = "";
+            _log.LogInformation("Cleared EnrollmentKey from appsettings.json after registration");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Could not clear EnrollmentKey from appsettings.json");
+        }
     }
 }
 

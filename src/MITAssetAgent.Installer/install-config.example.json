@@ -1,0 +1,6 @@
+{
+  "SupabaseUrl": "https://wjkijzoizbtusqoasjjb.supabase.co",
+  "EnrollmentKey": "YOUR_AGENT_ENROLLMENT_KEY",
+  "WorkspaceId": "main",
+  "HeartbeatIntervalMinutes": 5
+}

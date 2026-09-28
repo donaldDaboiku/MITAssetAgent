@@ -22,17 +22,12 @@ Production Windows Service that runs on each company PC:
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/API.md](docs/API.md), [docs/SECURITY.md](docs/SECURITY.md).
 
+**On each PC (easiest):** extract `dist/MITAssetAgent-1.0.0-win-x64.zip`, edit `install-config.json`, then double‑click **`Install.cmd`** (accept the admin prompt). Do **not** run `MITAssetAgent.exe` directly.
+
 ```powershell
-# Requires .NET 8 SDK
+# Build PC needs .NET 8 SDK
 cd src
 dotnet publish MITAssetAgent.Service\MITAssetAgent.Service.csproj -c Release -r win-x64 --self-contained true -o .\publish
-
-# On each PC (Admin PowerShell):
-.\MITAssetAgent.Installer\Install-MITAssetAgent.ps1 `
-  -PublishDir ".\publish" `
-  -SupabaseUrl "https://YOUR_PROJECT.supabase.co" `
-  -EnrollmentKey "YOUR_AGENT_ENROLLMENT_KEY" `
-  -WorkspaceId "main"
 ```
 
 ## Supabase (owned by this project)
