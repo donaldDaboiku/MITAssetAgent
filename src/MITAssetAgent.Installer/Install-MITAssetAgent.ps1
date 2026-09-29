@@ -26,7 +26,7 @@ $DisplayName = "MIT Asset Agent"
 
 # Load install-config.json when present (Install.cmd path). CLI args override file values.
 if ($ConfigFile -and (Test-Path -LiteralPath $ConfigFile)) {
-  $cfg = Get-Content -LiteralPath $ConfigFile -Raw | ConvertFrom-Json
+  $cfg = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
   if (-not $SupabaseUrl -and $cfg.SupabaseUrl) { $SupabaseUrl = [string]$cfg.SupabaseUrl }
   if (-not $EnrollmentKey -and $cfg.EnrollmentKey) { $EnrollmentKey = [string]$cfg.EnrollmentKey }
   if ($cfg.WorkspaceId) { $WorkspaceId = [string]$cfg.WorkspaceId }
@@ -46,11 +46,13 @@ if (-not $EnrollmentKey -or $EnrollmentKey -match 'YOUR_AGENT_ENROLLMENT') {
 
 Write-Host "Installing $DisplayName..."
 
+$logsDir = Join-Path $DataDir "logs"
+$updatesDir = Join-Path $DataDir "updates"
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
-New-Item -ItemType Directory -Force -Path "$DataDir\logs" | Out-Null
-New-Item -ItemType Directory -Force -Path "$DataDir\updates" | Out-Null
+New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+New-Item -ItemType Directory -Force -Path $updatesDir | Out-Null
 
-# Harden data dir: SYSTEM + Administrators only (enrollment leftovers / token / queue).
+# Harden data dir: SYSTEM + Administrators only.
 try {
   $acl = New-Object System.Security.AccessControl.DirectorySecurity
   $acl.SetAccessRuleProtection($true, $false)
@@ -61,17 +63,21 @@ try {
   }
   Set-Acl -Path $DataDir -AclObject $acl
 } catch {
-  Write-Warning "Could not tighten ACL on $DataDir : $($_.Exception.Message)"
+  Write-Warning ("Could not tighten ACL on {0}: {1}" -f $DataDir, $_.Exception.Message)
 }
 
 Copy-Item -Path (Join-Path $PublishDir "*") -Destination $InstallRoot -Recurse -Force
 
 # Never leave install secrets under Program Files.
-Remove-Item -LiteralPath (Join-Path $InstallRoot "install-config.json") -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $InstallRoot "install-config.example.json") -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $InstallRoot "install-log.txt") -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $InstallRoot "Install.cmd") -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $InstallRoot "Install-MITAssetAgent.ps1") -Force -ErrorAction SilentlyContinue
+foreach ($name in @(
+  "install-config.json",
+  "install-config.example.json",
+  "install-log.txt",
+  "Install.cmd",
+  "Install-MITAssetAgent.ps1"
+)) {
+  Remove-Item -LiteralPath (Join-Path $InstallRoot $name) -Force -ErrorAction SilentlyContinue
+}
 # Keep Uninstall-MITAssetAgent.ps1 under Program Files for later removal.
 
 $appsettings = @{
@@ -94,18 +100,18 @@ $appsettings = @{
 Set-Content -Path (Join-Path $InstallRoot "appsettings.json") -Value $appsettings -Encoding UTF8
 
 $exe = Join-Path $InstallRoot "MITAssetAgent.exe"
-if (-not (Test-Path $exe)) {
+if (-not (Test-Path -LiteralPath $exe)) {
   throw "MITAssetAgent.exe not found in $InstallRoot. Publish the Service project first."
 }
 
-# Register Event Log source while we have admin (agent itself must not create it at runtime).
+# Register Event Log source while we have admin.
 try {
   if (-not [System.Diagnostics.EventLog]::SourceExists($DisplayName)) {
     [System.Diagnostics.EventLog]::CreateEventSource($DisplayName, "Application")
     Write-Host "Registered Event Log source: $DisplayName"
   }
 } catch {
-  Write-Warning "Could not register Event Log source (file logging will still work): $($_.Exception.Message)"
+  Write-Warning ("Could not register Event Log source (file logging will still work): {0}" -f $_.Exception.Message)
 }
 
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
@@ -115,16 +121,16 @@ if ($existing) {
   Start-Sleep -Seconds 2
 }
 
-New-Service -Name $ServiceName -BinaryPathName "`"$exe`"" -DisplayName $DisplayName -StartupType Automatic -Description "Reports device presence to MIT Asset"
+New-Service -Name $ServiceName -BinaryPathName ('"{0}"' -f $exe) -DisplayName $DisplayName -StartupType Automatic -Description "Reports device presence to MIT Asset"
 sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
 try {
   Start-Service -Name $ServiceName
 } catch {
   $tail = ""
-  $latest = Get-ChildItem -Path (Join-Path $DataDir "logs") -Filter "*.log" -ErrorAction SilentlyContinue |
+  $latest = Get-ChildItem -Path $logsDir -Filter "*.log" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if ($latest) { $tail = (Get-Content $latest.FullName -Tail 20) -join "`n" }
-  throw "Service installed but failed to start. $($_.Exception.Message)`nLog tail:`n$tail"
+  if ($latest) { $tail = (Get-Content -LiteralPath $latest.FullName -Tail 20) -join [Environment]::NewLine }
+  throw ("Service installed but failed to start. {0}{1}Log tail:{1}{2}" -f $_.Exception.Message, [Environment]::NewLine, $tail)
 }
 
 # Wait for first registration (token.dpapi), then scrub enrollment key from disk.
@@ -139,7 +145,7 @@ while ((Get-Date) -lt $deadline) {
 
 function Clear-EnrollmentKeyInAppsettings([string]$path) {
   if (-not (Test-Path -LiteralPath $path)) { return }
-  $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+  $json = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
   if ($json.Agent) {
     $json.Agent.EnrollmentKey = ""
     ($json | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $path -Encoding UTF8
@@ -150,8 +156,8 @@ if (Test-Path -LiteralPath $tokenPath) {
   Clear-EnrollmentKeyInAppsettings $appsettingsPath
   Write-Host "Registered OK. Enrollment key cleared from appsettings.json."
 } else {
-  Write-Warning "No token yet after 90s — check $DataDir\logs. Enrollment key left for retry; agent will clear it after successful register."
+  Write-Warning ("No token yet after 90s - check {0}. Enrollment key left for retry; agent will clear it after successful register." -f $logsDir)
 }
 
 Write-Host "Installed and started $DisplayName."
-Write-Host "Data: $DataDir  Logs: $DataDir\logs"
+Write-Host ("Data: {0}  Logs: {1}" -f $DataDir, $logsDir)
