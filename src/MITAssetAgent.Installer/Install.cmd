@@ -73,11 +73,15 @@ if not errorlevel 1 (
   exit /b 1
 )
 
-set "LOG=%~dp0install-log.txt"
+REM Strip trailing backslash from %~dp0 so quoted -PublishDir does not eat -ConfigFile
+set "ROOT=%~dp0"
+if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+
+set "LOG=%ROOT%\install-log.txt"
 echo Running installer... (log: install-log.txt)
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-MITAssetAgent.ps1" -PublishDir "%~dp0" -ConfigFile "%~dp0install-config.json" > "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\Install-MITAssetAgent.ps1" -PublishDir "%ROOT%" -ConfigFile "%ROOT%\install-config.json" > "%LOG%" 2>&1
 set ERR=%ERRORLEVEL%
 
 type "%LOG%"
