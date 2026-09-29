@@ -66,6 +66,28 @@ try {
   Write-Warning ("Could not tighten ACL on {0}: {1}" -f $DataDir, $_.Exception.Message)
 }
 
+# Stop existing service/process BEFORE copy so Program Files DLLs are not locked.
+$existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existing) {
+  Write-Host "Stopping existing $ServiceName service..."
+  Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+  sc.exe delete $ServiceName | Out-Null
+}
+Get-Process -Name "MITAssetAgent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# Wait for file handles (clrjit.dll etc.) to release after stop/delete.
+$unlockDeadline = (Get-Date).AddSeconds(20)
+$lockProbe = Join-Path $InstallRoot "clrjit.dll"
+while ((Get-Date) -lt $unlockDeadline) {
+  if (-not (Test-Path -LiteralPath $lockProbe)) { break }
+  try {
+    $fs = [IO.File]::Open($lockProbe, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $fs.Close()
+    break
+  } catch {
+    Start-Sleep -Milliseconds 500
+  }
+}
+
 Copy-Item -Path (Join-Path $PublishDir "*") -Destination $InstallRoot -Recurse -Force
 
 # Never leave install secrets under Program Files.
@@ -112,13 +134,6 @@ try {
   }
 } catch {
   Write-Warning ("Could not register Event Log source (file logging will still work): {0}" -f $_.Exception.Message)
-}
-
-$existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($existing) {
-  Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-  sc.exe delete $ServiceName | Out-Null
-  Start-Sleep -Seconds 2
 }
 
 New-Service -Name $ServiceName -BinaryPathName ('"{0}"' -f $exe) -DisplayName $DisplayName -StartupType Automatic -Description "Reports device presence to MIT Asset"
